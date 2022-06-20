@@ -12,7 +12,7 @@
 - Dataset candidates:
     - Phase contrast microscopy of YEAST cells (TODO download link)
 - ImageJ/Fiji https://imagej.net/software/fiji/downloads
-- Napari (python-based image viewer): https://napari.org/tutorials/fundamentals/installation.html
+- Napari (python-based image viewer): https://napari.org/tutorials/fundamentals/installation.html (Optional: Annotate via _Sidecar_ on iPad, Ben has this working)
 - Labkit https://imagej.net/plugins/labkit/
 - StarDist jupyter notebooks https://github.com/stardist/stardist/tree/master/examples/2D
 
