@@ -6,30 +6,26 @@
     1. Manley group: TODO
     2. Martin group: TODO
     3. Aumeier group: TODO
-1. (Outcome of time arrow predictions on participant's datasets)
+1. (TODO Outcome of time arrow predictions on participant's datasets)
 
-## Material
-- Dataset candidates:
-    - Phase contrast microscopy of YEAST cells (TODO download link)
-- ImageJ/Fiji https://imagej.net/software/fiji/downloads
-- Napari (python-based image viewer): https://napari.org/tutorials/fundamentals/installation.html (Optional: Annotate via _Sidecar_ on iPad, Ben has this working)
-- Labkit https://imagej.net/plugins/labkit/
-- StarDist jupyter notebooks https://github.com/stardist/stardist/tree/master/examples/2D
+## Resources
+- Dataset: Phase contrast microscopy of YEAST cells (TODO download link)
+- Napari (python-based image viewer): https://napari.org/tutorials/fundamentals/installation.html
+- StarDist https://github.com/stardist/stardist#installation
+- StarDist napari plugin https://github.com/stardist/stardist-napari
 
 ## Part 1 curriculum
-1. Intro + look at the dataset in napari + intro to napari (10 mins).
-3. Use pretrained Fluo StarDist model for predictions in napari plugin, show failure (5 mins).
-4. (Rough annotation of one image (ddF8BF_crop_1_10.tif) in napari by participant (30s) + train a model with that (5 mins))
-5. Annotation of one image (ddF8BF_crop_1_10.tif) in napari + train a model (10 mins).
-6. Data augmentations for one image + train a model (10 mins).
+1. Intro + look at the dataset in napari + intro to napari (10 mins, Ben).
+1. Use pretrained Fluo StarDist model for predictions in napari plugin, show failure (5 mins, Ben).
+1. Annotation of one image (Ben) (ddF8BF_crop_1_10.tif) in napari, train a model (Albert) (10 mins).
+1. Data augmentations for one image + train a model (10 mins, Albert).
     - show different data augmetation transforms (and ask audience for input).
-7. Start training on full data (10 mins), during that
+1. Start training on full data (10 mins, Albert), during that explain
     - StarDist method
-    - explain train-val-test
+    - rain-val-test
     - overfitting
     - early-stopping
-
-1. Segment unannotated images with jupyter notebook, using a model pretrained on the yeast dataset in napari plugin. (5 mins)
+1. Segment unannotated images with trained yeast model in napari plugin (5 mins, Ben).
 
 Backup:
 - Interactive watershed-based segmentation in Fiji (8 bit, denoise with median, (blur sigma 2), opening 3, invert, interactive watershed).
