@@ -8,15 +8,16 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: tf
+#     display_name: Python 3
 #     language: python
-#     name: tf
+#     name: python3
 # ---
 
 # %%
 from __future__ import print_function, unicode_literals, absolute_import, division
 import os
 import sys
+from pathlib import Path
 import numpy as np
 import matplotlib
 matplotlib.rcParams["image.interpolation"] = "none"
@@ -25,70 +26,33 @@ import matplotlib.pyplot as plt
 # %config InlineBackend.figure_format = 'retina'
 
 from glob import glob
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 from tifffile import imread
-from csbdeep.utils import Path, normalize
+from csbdeep.utils import normalize
 
 from stardist import fill_label_holes, random_label_cmap, calculate_extents, gputools_available
 from stardist.matching import matching, matching_dataset
 from stardist.models import Config2D, StarDist2D, StarDistData2D
 
-import augmend
-
 np.random.seed(42)
 lbl_cmap = random_label_cmap()
 
+# %%
+# %%capture
+# !pip install pip install git+https://github.com/stardist/augmend.git
+import augmend
+# !pip install gputools
+
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
-# # Data
-#
-# We assume that data has already been split into disjoint training, validation and test sets.  
-#
-# <div class="alert alert-block alert-info">
-# Training data (for input `X` with associated label masks `Y`) can be provided via lists of numpy arrays, where each image can have a different size. Alternatively, a single numpy array can also be used if all images have the same size.  
-# Input images can either be two-dimensional (single-channel) or three-dimensional (multi-channel) arrays, where the channel axis comes last. Label images need to be integer-valued.
-# </div>
+# # Load and prepare annotated image
 
 # %%
-num_imgs = 0
-data = {}
-for split in ["train", "val", "test"]:
-    X = sorted(glob(f'{os.getenv("HOME")}/EPFL/data/yeast/split/{split}/images/*.tif'))
-    X = [imread(x) for x in X]
-    Y = sorted(glob(f'{os.getenv("HOME")}/EPFL/data/yeast/split/{split}/masks/*.tif'))
-    Y = [imread(y) for y in Y]
-    data[split] = (X.copy(), Y.copy())
-    num_imgs += len(X)
-X_trn, Y_trn = data["train"]
-X_val, Y_val = data["val"]
-X_test, Y_test = data["test"]
-print('number of images: %3d' % num_imgs)
-print('- training:       %3d' % len(X_trn))
-print('- validation:     %3d' % len(X_val))
-print('- test:     %3d' % len(X_test))
-n_channel = 1 if X[0].ndim == 2 else X[0].shape[-1]
-
-# %% [markdown]
-# Normalize images using intensity percentiles and fill small label holes.
-
-# %%
-axis_norm = (0,1)   # normalize channels independently
-
-if n_channel > 1:
-    print("Normalizing image channels %s." % ('jointly' if axis_norm is None or 2 in axis_norm else 'independently'))
-    sys.stdout.flush()
-
-X_trn = [normalize(x,1,99.8,axis=axis_norm) for x in tqdm(X_trn)]
-Y_trn = [fill_label_holes(y) for y in tqdm(Y_trn)]
-
-X_val = [normalize(x,1,99.8,axis=axis_norm) for x in tqdm(X_val)]
-Y_val = [fill_label_holes(y) for y in tqdm(Y_val)]
-
-X_test = [normalize(x,1,99.8,axis=axis_norm) for x in tqdm(X_test)]
-Y_test = [fill_label_holes(y) for y in tqdm(Y_test)]
+# base_path = Path("~/EPFL/data/yeast/split/").expanduser()
+base_path = Path("/data/datasets/yeast/yeast_masks/splits").expanduser()
 
 
 # %% [markdown]
-# Training data consists of pairs of input image and label instances.
+# Utility functions
 
 # %%
 def plot_img_label(img, lbl, img_title="image", lbl_title="label", **kwargs):
@@ -99,15 +63,61 @@ def plot_img_label(img, lbl, img_title="image", lbl_title="label", **kwargs):
     al.imshow(lbl, cmap=lbl_cmap)
     al.set_title(lbl_title)
     plt.tight_layout()
+    
+def preprocess(X, Y, axis_norm=(0,1)):
+    # normalize channels independently
+
+    if n_channel > 1:
+        print("Normalizing image channels %s." % ('jointly' if axis_norm is None or 2 in axis_norm else 'independently'))
+        sys.stdout.flush()
+    X = [normalize(x,1,99.8,axis=axis_norm) for x in tqdm(X, leave=False, desc="Normalize images")]
+    Y = [fill_label_holes(y) for y in tqdm(Y, leave=False, desc="Fill holes in labels")]
+    return X, Y
 
 
 # %%
-i = min(9, len(X)-1)
-img, lbl = X_trn[i], Y_trn[i]
-assert img.ndim in (2,3)
-img = img if (img.ndim==2 or img.shape[-1]==3) else img[...,0]
-plot_img_label(img,lbl)
-None;
+# img50_custom_mask = imread(base_path / "train/custom_masks/clnF10BF_crop_1_10_ad.tif")
+img = imread(base_path / "train/images/ddF8BF_crop_1_10.tif")
+lbl = imread(base_path / "train/masks/ddF8BF_crop_1_10.tif")
+n_channel = 1
+
+# %% [markdown]
+# Normalize images using intensity percentiles and fill small label holes.
+
+# %%
+img, lbl = preprocess([img], [lbl])
+img, lbl = img[0], lbl[0]
+
+# %%
+plot_img_label(img, lbl)
+
+# %% [markdown]
+# # Load entire dataset
+# We assume that data has already been split into disjoint training, validation and test sets.
+
+# %%
+num_imgs = 0
+data = {}
+for split in ["train", "val", "test"]:
+    X = sorted((base_path / split / "images").glob("*.tif"))
+    X = [imread(x) for x in X]
+    Y = sorted((base_path / split / "masks").glob("*.tif"))
+    Y = [imread(y) for y in Y]
+    data[split] = (X.copy(), Y.copy())
+    num_imgs += len(X)
+X_trn, Y_trn = data["train"]
+X_val, Y_val = data["val"]
+X_test, Y_test = data["test"]
+print('number of images: %3d' % num_imgs)
+print('- training:       %3d' % len(X_trn))
+print('- validation:     %3d' % len(X_val))
+print('- test:     %3d' % len(X_test))
+print(f"Number of channels: {n_channel}")
+
+# %%
+X_trn, Y_trn = preprocess(X_trn, Y_trn)
+X_val, Y_val = preprocess(X_val, Y_val)
+X_test, Y_test = preprocess(X_test, Y_test)
 
 # %% [markdown] tags=[]
 # # General training setup
@@ -127,39 +137,30 @@ conf = Config2D (
     use_gpu      = use_gpu,
     n_channel_in = n_channel
 )
-print(conf)
+
+# Print config to see default values
+# print(conf)
 
 # %%
 if use_gpu:
     from csbdeep.utils.tf import limit_gpu_memory
     # adjust as necessary: limit GPU memory to be used by TensorFlow to leave some to OpenCL-based computations
-    limit_gpu_memory(1, total_memory=16000)
-
-# %%
-img50_custom_mask = imread(f"{os.getenv('HOME')}/EPFL/data/yeast/split/train/custom_masks/clnF10BF_crop_1_10_ad.tif")
+    limit_gpu_memory(0.3, total_memory=48000)
 
 # %% [markdown] tags=[]
-# # Training using few annotations
+# # Training with one annotated image
 
 # %%
-i = 165
-img, lbl = X_trn[i], Y_trn[i]
-assert img.ndim in (2,3)
-img = img if (img.ndim==2 or img.shape[-1]==3) else img[...,0]
-plot_img_label(img,lbl)
-None;
+# X_trn_single, Y_trn_single = [X_trn[i]], [Y_trn[i]]
 
 # %%
-X_trn_single, Y_trn_single = [X_trn[i]], [Y_trn[i]]
-
-# %%
-model = StarDist2D(conf, name='stardist_single_annotation_gt_cpu', basedir='models')
+model = StarDist2D(conf, name='hand_annotation', basedir='models')
 
 # %% [markdown]
 # Check if the neural network has a large enough field of view to see up to the boundary of most objects.
 
 # %%
-median_size = calculate_extents(list([Y_trn_single]), np.median)
+median_size = calculate_extents(list([lbl]), np.median)
 fov = np.array(model._axes_tile_overlap('YX'))
 print(f"median object size:      {median_size}")
 print(f"network field of view :  {fov}")
@@ -167,12 +168,14 @@ if any(median_size > fov):
     print("WARNING: median object size larger than field of view of the neural network.")
 
 # %% tags=[]
-history = model.train(X_trn_single, Y_trn_single, validation_data=(X_val, Y_val), steps_per_epoch=10, seed=42, epochs=100)
+# # %%capture
+log = model.train([img], [lbl], validation_data=(X_val, Y_val), steps_per_epoch=10, seed=42, epochs=10)
+model.optimize_thresholds([img], [lbl])
 
 # %%
 plt.figure(figsize=(12,6))
-plt.plot(range(100), history.history["loss"], label="Train")
-plt.plot(range(100), history.history["val_loss"], label="Validation")
+plt.plot(range(len(log.history["loss"])), log.history["loss"], label="Train")
+plt.plot(range(len(log.history["val_loss"])), log.history["val_loss"], label="Validation")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.title("Training on single image")
@@ -180,29 +183,27 @@ plt.legend()
 plt.show();
 
 # %%
-model.optimize_thresholds(X_trn_single, Y_trn_single)
+pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
+              for x in tqdm([img])]
 
 # %%
-Y_trn_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm(X_trn_single)]
+plot_img_label(img, lbl, lbl_title="label GT")
+plot_img_label(img, pred[0], lbl_title="label Pred")
 
 # %%
-plot_img_label(X_trn_single[0],Y_trn_single[0], lbl_title="label GT")
-plot_img_label(X_trn_single[0],Y_trn_pred[0], lbl_title="label Pred")
-
-# %%
-# %%capture
 Y_val_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_val)]
 
 # %%
-idx = 22
-plot_img_label(X_val[idx],Y_val[idx], lbl_title="label GT")
+idx = 12
 plot_img_label(X_val[idx],Y_val_pred[idx], lbl_title="label Pred")
 
 
 # %% [markdown] tags=[]
-# # Data Augmentation
+# # More training data, part 1: Augmentations
+
+# %%
+# TODO show transformations
 
 # %% [markdown]
 # You can define a function/callable that applies augmentation to each batch of the data generator.  
@@ -270,7 +271,7 @@ plot_img_label(X_val[idx],Y_val[idx], lbl_title="label GT")
 plot_img_label(X_val[idx],Y_val_pred[idx], lbl_title="label Pred")
 
 # %% [markdown] tags=[]
-# # Regular training pipeline
+# # More training data, part 2: Annotate more by hand!
 
 # %% tags=[]
 model_full = StarDist2D(conf, name='stardist_regular_v2', basedir='models')
