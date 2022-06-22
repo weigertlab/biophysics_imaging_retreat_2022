@@ -17,14 +17,19 @@
 - StarDist jupyter notebooks https://github.com/stardist/stardist/tree/master/examples/2D
 
 ## Part 1 curriculum
-1. Option A: Load data into Labkit and annotate + export tif files
-    - Downside: Not made for dense annotations, flood filling tool only works on single 2d images.
-- Upside: Comparison with Random Forest classifier. Do we want to show that?
-1. Option B: Annotate in Napari. Flood filling needed for dense ground truth annotations works in 2d even when working on images stacks. 
-1. (Install StarDist)
-1. Inspect data & annotations with jupyter notebook [1_data.ipynb](https://github.com/stardist/stardist/blob/master/examples/2D/1_data.ipynb).
-1. Train a segmentation model with jupyter notebook [2_training.ipynb](https://github.com/stardist/stardist/blob/master/examples/2D/2_training.ipynb)
-    1. Overfit
-    1. etc TODO
-1. Segment unannotated images with jupyter notebook [3_prediction.ipynb](https://github.com/stardist/stardist/blob/master/examples/2D/3_prediction.ipynb)
+1. Intro + look at the dataset in napari (5 mins).
+1. Use pretrained Fluo StarDist model for predictions in napari plugin, show failure (5 mins).
+1. (Rough annotation of one image (ddF8BF_crop_1_10.tif) in napari by participant (30s) + train a model with that (5 mins))
+1. Annotation of one image (ddF8BF_crop_1_10.tif) in napari + train a model (10 mins).
+1. Data augmentations for one image + train a model (10 mins).
+    - show different data augmetation transforms (and ask audience for input).
+1. Start training on full data (10 mins), during that
+    - StarDist method
+    - explain train-val-test
+    - overfitting
+    - early-stopping
 
+1. Segment unannotated images with jupyter notebook, using a model pretrained on the yeast dataset [3_prediction.ipynb](https://github.com/stardist/stardist/blob/master/examples/2D/3_prediction.ipynb) OR again in napari plugin. (5 mins)
+
+Backup:
+- Interactive watershed-based segmentation in Fiji (8 bit, denoise with median, (blur sigma 2), opening 3, invert, interactive watershed).
