@@ -13,6 +13,15 @@
 #     name: python3
 # ---
 
+# %% [markdown]
+# # 0. Install StarDist as described [here]( https://github.com/stardist/stardist#installation)
+
+# %%
+import stardist
+
+# %% [markdown]
+# # 1. Load packages
+
 # %%
 from __future__ import print_function, unicode_literals, absolute_import, division
 import os
@@ -24,6 +33,7 @@ matplotlib.rcParams["image.interpolation"] = "none"
 import matplotlib.pyplot as plt
 # %matplotlib inline
 # %config InlineBackend.figure_format = 'retina'
+matplotlib.rcParams['figure.figsize'] = (12, 5)
 
 from glob import glob
 from tqdm.notebook import tqdm
@@ -39,15 +49,26 @@ lbl_cmap = random_label_cmap()
 
 # %%
 # %%capture
+# !pip install jupytext
 # !pip install pip install git+https://github.com/stardist/augmend.git
 import augmend
+from augmend import (
+    Augmend,
+    FlipRot90,
+    AdditiveNoise,
+    Elastic,
+    Rotate,
+    IntensityScaleShift,
+    Scale,
+    Identity,
+)
 # !pip install gputools
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
-# # Load and prepare annotated image
+# # 2. Load and prepare annotated image
 
 # %%
-# base_path = Path("~/EPFL/data/yeast/split/").expanduser()
+# base_path = Path("~/EPFL/data/yeast/split").expanduser()
 base_path = Path("/data/datasets/yeast/yeast_masks/splits").expanduser()
 
 
@@ -56,10 +77,9 @@ base_path = Path("/data/datasets/yeast/yeast_masks/splits").expanduser()
 
 # %%
 def plot_img_label(img, lbl, img_title="image", lbl_title="label", **kwargs):
-    fig, (ai,al) = plt.subplots(1,2, figsize=(12,5), gridspec_kw=dict(width_ratios=(1.25,1)))
+    fig, (ai,al) = plt.subplots(1,2, figsize=(12,5), gridspec_kw=dict(width_ratios=(1,1)))
     im = ai.imshow(img, cmap='gray', clim=(0,1))
     ai.set_title(img_title)    
-    fig.colorbar(im, ax=ai)
     al.imshow(lbl, cmap=lbl_cmap)
     al.set_title(lbl_title)
     plt.tight_layout()
@@ -76,7 +96,6 @@ def preprocess(X, Y, axis_norm=(0,1)):
 
 
 # %%
-# img50_custom_mask = imread(base_path / "train/custom_masks/clnF10BF_crop_1_10_ad.tif")
 img = imread(base_path / "train/images/ddF8BF_crop_1_10.tif")
 lbl = imread(base_path / "train/masks/ddF8BF_crop_1_10.tif")
 n_channel = 1
@@ -87,15 +106,19 @@ n_channel = 1
 # %%
 img, lbl = preprocess([img], [lbl])
 img, lbl = img[0], lbl[0]
+plt.hist(img.flatten(), bins=100)
+plt.title("Histogram of normalized image")
+plt.show();
 
 # %%
 plot_img_label(img, lbl)
 
 # %% [markdown]
-# # Load entire dataset
+# # 3. Load entire dataset
 # We assume that data has already been split into disjoint training, validation and test sets.
 
 # %%
+# TODO more realistic here: Annotate a second image by hand, use that as validation?
 num_imgs = 0
 data = {}
 for split in ["train", "val", "test"]:
@@ -120,10 +143,13 @@ X_val, Y_val = preprocess(X_val, Y_val)
 X_test, Y_test = preprocess(X_test, Y_test)
 
 # %% [markdown] tags=[]
-# # General training setup
+# # 4. Training with one annotated image
+
+# %% [markdown] tags=[]
+# ## Training setup
 
 # %%
-n_rays = 48
+n_rays = 32
 
 # Use OpenCL-based computations for data generator during training (requires 'gputools')
 use_gpu = True and gputools_available()
@@ -132,14 +158,15 @@ use_gpu = True and gputools_available()
 grid = (2,2)
 
 conf = Config2D (
-    n_rays       = n_rays,
-    grid         = grid,
-    use_gpu      = use_gpu,
-    n_channel_in = n_channel
+    n_rays = n_rays,
+    grid = grid,
+    use_gpu = use_gpu,
+    n_channel_in = n_channel,
+    train_learning_rate = 0.0005,
 )
 
 # Print config to see default values
-# print(conf)
+# vars(conf)
 
 # %%
 if use_gpu:
@@ -147,14 +174,8 @@ if use_gpu:
     # adjust as necessary: limit GPU memory to be used by TensorFlow to leave some to OpenCL-based computations
     limit_gpu_memory(0.3, total_memory=48000)
 
-# %% [markdown] tags=[]
-# # Training with one annotated image
-
 # %%
-# X_trn_single, Y_trn_single = [X_trn[i]], [Y_trn[i]]
-
-# %%
-model = StarDist2D(conf, name='hand_annotation', basedir='models')
+model = StarDist2D(conf, name='single_image', basedir='models')
 
 # %% [markdown]
 # Check if the neural network has a large enough field of view to see up to the boundary of most objects.
@@ -169,112 +190,122 @@ if any(median_size > fov):
 
 # %% tags=[]
 # # %%capture
-log = model.train([img], [lbl], validation_data=(X_val, Y_val), steps_per_epoch=10, seed=42, epochs=10)
+log = model.train([img], [lbl], validation_data=(X_val, Y_val), epochs=50, steps_per_epoch=10, seed=42)
 model.optimize_thresholds([img], [lbl])
 
 # %%
-plt.figure(figsize=(12,6))
-plt.plot(range(len(log.history["loss"])), log.history["loss"], label="Train")
-plt.plot(range(len(log.history["val_loss"])), log.history["val_loss"], label="Validation")
+plt.plot(log.history["loss"], label="Train")
+plt.plot(log.history["val_loss"], label="Validation")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
-plt.title("Training on single image")
+plt.title("Training with one annotated image")
 plt.legend()
 plt.show();
 
 # %%
-pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm([img])]
-
-# %%
-plot_img_label(img, lbl, lbl_title="label GT")
-plot_img_label(img, pred[0], lbl_title="label Pred")
+pred = model.predict_instances(img, n_tiles=model._guess_n_tiles(img), show_tile_progress=False)[0]
+plot_img_label(img, lbl, img_title="Training image", lbl_title="Annotations")
+plot_img_label(img, pred, img_title="Training image", lbl_title="Predicted segmentation")
 
 # %%
 Y_val_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_val)]
 
 # %%
-idx = 12
-plot_img_label(X_val[idx],Y_val_pred[idx], lbl_title="label Pred")
-
+idx = 22
+plot_img_label(X_val[idx], Y_val_pred[idx], img_title=f"Validation image (ID {idx})", lbl_title="Predicted segmentation")
 
 # %% [markdown] tags=[]
-# # More training data, part 1: Augmentations
-
-# %%
-# TODO show transformations
+# # 5. More training data, part 1: Augmentations
 
 # %% [markdown]
-# You can define a function/callable that applies augmentation to each batch of the data generator.  
-# We here use an `augmenter` that applies random rotations, flips, intensity, noise addition and elastic transformations, which are typically sensible for (2D) microscopy images.
+# Original image
+
+# %%
+plot_img_label(img, lbl, img_title="Original", lbl_title="Original annotation")
+
+# %% [markdown]
+# Transformed image.
+#
+# Comment/Uncomment individual lines to apply different random transformations. Documentation at https://github.com/stardist/augmend.
+
+# %%
+transform = Augmend()
+transform.add([IntensityScaleShift(scale=(0.75, 1.33), shift=(-0.33, 0.33)), Identity()])
+# transform.add([AdditiveNoise(), Identity()])
+# transform.add([Elastic(amount=32, grid=5, order=3), Elastic(amount=32, grid=5, order=0)])
+# transform.add([Rotate(order=1, mode="constant"), Rotate(order=0, mode="constant")])
+# transform.add([Elastic(amount=32, order=1), Elastic(amount=32, order=0)])
+# transform.add([Scale(order=1), Scale(order=0)])
+
+
+img_aug, lbl_aug = transform([img, lbl])
+plot_img_label(img_aug, lbl_aug, img_title="Transformed image", lbl_title="Transformed label")
+
 
 # %%
 def build_augmenter(use_gpu):
-    augment_probability = 1
-    aug = augmend.Augmend()
-    axes = (0, 1)
-    aug.add([augmend.AdditiveNoise(sigma=0.1), augmend.Identity()], probability=augment_probability)
-    aug.add([augmend.Elastic(axis=axes, amount=4, grid=5, use_gpu=use_gpu), augmend.Elastic(axis=axes, amount=4, grid=5, use_gpu=use_gpu, order=0)], probability=augment_probability)
-    aug.add([augmend.FlipRot90(axis=axes), augmend.FlipRot90(axis=axes)], probability=augment_probability)
-    aug.add([augmend.Rotate(axis=axes), augmend.Rotate(axis=axes, order=0)], probability=augment_probability)
-    aug.add([augmend.IntensityScaleShift(scale=(0.9, 1.1), shift=(-0.05, 0.05), axis=axes), augmend.Identity()], probability=augment_probability)
+    aug = Augmend()
+    aug.add([Elastic(amount=5, grid=11, use_gpu=use_gpu, order=1), Elastic(amount=5, grid=11, use_gpu=use_gpu, order=0)])
+    aug.add([Rotate(order=1), Rotate(order=0)])
+    aug.add([IntensityScaleShift(), Identity()])
+    aug.add([AdditiveNoise(sigma=0.1), Identity()])
+
     return aug
 
+augmenter = build_augmenter(use_gpu=use_gpu)
+augmenter_fun = lambda x, y: augmenter((x, y))
 
 # %%
-augmenter = build_augmenter(use_gpu=True)
-augmenter_fun = lambda x, y: augmenter((x, y))
 # plot some augmented examples
-img, lbl = X_trn[0], Y_trn[0]
 plot_img_label(img, lbl)
 for _ in range(3):
     img_aug, lbl_aug = augmenter_fun(img,lbl)
-    plot_img_label(img_aug, lbl_aug, img_title="image augmented", lbl_title="label augmented")
+    plot_img_label(img_aug, lbl_aug, img_title="Image augmented", lbl_title="Label augmented")
 
 # %%
-model_aug = StarDist2D(conf, name='stardist_single_annotation_gt_augmented', basedir='models')
-
-# %%
-augmend_obj = build_augmenter(use_gpu=True)
+model_aug = StarDist2D(conf, name='single_image_augmented', basedir='models')
 
 # %% tags=[]
-history_aug = model_aug.train(X_trn_single, Y_trn_single, validation_data=(X_val, Y_val), steps_per_epoch=10, seed=42, epochs=100, augmenter=augmenter_fun)
+# # %%capture
+log_aug = model_aug.train(
+    [img],
+    [lbl],
+    validation_data=(X_val, Y_val),
+    augmenter=augmenter_fun,
+    epochs=50,
+    steps_per_epoch=10,
+    seed=42
+)
+model_aug.optimize_thresholds([img], [lbl])
 
 # %%
-plt.figure(figsize=(12,6))
-plt.plot(range(100), history_aug.history["loss"], label="Train")
-plt.plot(range(100), history_aug.history["val_loss"], label="Validation")
+plt.plot(log_aug.history["loss"], label="Train")
+plt.plot(log_aug.history["val_loss"], label="Validation")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
-plt.title("Single-image w/ augmentation training pipeline")
+plt.title("Training with one image + data augmentations")
 plt.legend()
 plt.show();
 
 # %%
-# %%capture
-Y_trn_pred = [model_aug.predict_instances(x, n_tiles=model_aug._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm(X_trn_single)]
+pred_aug = model_aug.predict_instances(img, n_tiles=model_aug._guess_n_tiles(img), show_tile_progress=False)[0]
+plot_img_label(img, lbl, img_title="Training image", lbl_title="Annotations")
+plot_img_label(img, pred_aug, img_title="Training image", lbl_title="Predicted segmentation")
 
 # %%
-plot_img_label(X_trn_single[0],Y_trn_single[0], lbl_title="label GT")
-plot_img_label(X_trn_single[0],Y_trn_pred[0], lbl_title="label Pred")
-
-# %%
-# %%capture
-Y_val_pred = [model_aug.predict_instances(x, n_tiles=model_aug._guess_n_tiles(x), show_tile_progress=False)[0]
+Y_val_pred_aug = [model_aug.predict_instances(x, n_tiles=model_aug._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_val)]
 
 # %%
 idx = 22
-plot_img_label(X_val[idx],Y_val[idx], lbl_title="label GT")
-plot_img_label(X_val[idx],Y_val_pred[idx], lbl_title="label Pred")
+plot_img_label(X_val[idx], Y_val_pred_aug[idx], img_title=f"Validation image (ID {idx})", lbl_title="Predicted segmentation")
 
 # %% [markdown] tags=[]
-# # More training data, part 2: Annotate more by hand!
+# # 6. More training data, part 2: Annotate more by hand!
 
 # %% tags=[]
-model_full = StarDist2D(conf, name='stardist_regular_v2', basedir='models')
+model_full = StarDist2D(conf, name='full_dataset', basedir='models')
 history_regular = model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter_fun, epochs=100, steps_per_epoch=np.ceil(len(X_trn)/conf.train_batch_size))
 
 # %%
