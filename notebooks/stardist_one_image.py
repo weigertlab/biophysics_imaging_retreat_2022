@@ -8,18 +8,18 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: Python 3
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
 # # 0. Install StarDist as described [here]( https://github.com/stardist/stardist#installation)
 
 # %%
 import stardist
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
 # # 1. Load packages
 
 # %%
@@ -64,13 +64,12 @@ from augmend import (
 )
 # !pip install gputools
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # # 2. Load and prepare annotated image
 
 # %%
-# base_path = Path("~/EPFL/data/yeast/split").expanduser()
-base_path = Path("/data/datasets/yeast/yeast_masks/splits").expanduser()
-
+base_path = Path("~/EPFL/data/yeast/split").expanduser()
+# base_path = Path("/data/datasets/yeast/yeast_masks/splits").expanduser()
 
 # %% [markdown]
 # Utility functions
@@ -113,7 +112,7 @@ plt.show();
 # %%
 plot_img_label(img, lbl)
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
 # # 3. Load entire dataset
 # We assume that data has already been split into disjoint training, validation and test sets.
 
@@ -142,7 +141,7 @@ X_trn, Y_trn = preprocess(X_trn, Y_trn)
 X_val, Y_val = preprocess(X_val, Y_val)
 X_test, Y_test = preprocess(X_test, Y_test)
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # # 4. Training with one annotated image
 
 # %% [markdown] tags=[]
@@ -215,7 +214,7 @@ Y_val_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_t
 idx = 22
 plot_img_label(X_val[idx], Y_val_pred[idx], img_title=f"Validation image (ID {idx})", lbl_title="Predicted segmentation")
 
-# %% [markdown] tags=[]
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
 # # 5. More training data, part 1: Augmentations
 
 # %% [markdown]
@@ -293,7 +292,7 @@ pred_aug = model_aug.predict_instances(img, n_tiles=model_aug._guess_n_tiles(img
 plot_img_label(img, lbl, img_title="Training image", lbl_title="Annotations")
 plot_img_label(img, pred_aug, img_title="Training image", lbl_title="Predicted segmentation")
 
-# %%
+# %% tags=[]
 Y_val_pred_aug = [model_aug.predict_instances(x, n_tiles=model_aug._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_val)]
 
@@ -306,7 +305,7 @@ plot_img_label(X_val[idx], Y_val_pred_aug[idx], img_title=f"Validation image (ID
 
 # %% tags=[]
 model_full = StarDist2D(conf, name='full_dataset', basedir='models')
-history_regular = model.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter_fun, epochs=100, steps_per_epoch=np.ceil(len(X_trn)/conf.train_batch_size))
+history_regular = model_full.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter_fun, epochs=100, steps_per_epoch=np.ceil(len(X_trn)/conf.train_batch_size))
 
 # %%
 plt.figure(figsize=(12,6))
@@ -325,11 +324,11 @@ model_full.optimize_thresholds(X_val, Y_val)
 # %%
 # %%capture
 Y_trn_pred = [model_full.predict_instances(x, n_tiles=model_full._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm(X_trn_single)]
+              for x in tqdm([img])]
 
 # %%
-plot_img_label(X_trn_single[0],Y_trn_single[0], lbl_title="label GT")
-plot_img_label(X_trn_single[0],Y_trn_pred[0], lbl_title="label Pred")
+plot_img_label(img, lbl, lbl_title="label GT")
+plot_img_label(img,Y_trn_pred[0], lbl_title="label Pred")
 
 # %%
 # %%capture
