@@ -50,7 +50,7 @@ lbl_cmap = random_label_cmap()
 # %%
 # %%capture
 # !pip install jupytext
-# !pip install pip install git+https://github.com/stardist/augmend.git
+# !pip install git+https://github.com/stardist/augmend.git
 import augmend
 from augmend import (
     Augmend,
@@ -171,7 +171,7 @@ conf = Config2D (
 if use_gpu:
     from csbdeep.utils.tf import limit_gpu_memory
     # adjust as necessary: limit GPU memory to be used by TensorFlow to leave some to OpenCL-based computations
-    limit_gpu_memory(0.3, total_memory=48000)
+    limit_gpu_memory(.9, total_memory=16000)
 
 # %%
 model = StarDist2D(conf, name='single_image', basedir='models')
@@ -189,8 +189,8 @@ if any(median_size > fov):
 
 # %% tags=[]
 # # %%capture
-log = model.train([img], [lbl], validation_data=(X_val, Y_val), epochs=50, steps_per_epoch=10, seed=42)
-model.optimize_thresholds([img], [lbl])
+log = model.train([img], [lbl], validation_data=([X_val[22]], [Y_val[22]]), epochs=100, steps_per_epoch=10, seed=42)
+model.optimize_thresholds([X_val[22]], [Y_val[22]])
 
 # %%
 plt.plot(log.history["loss"], label="Train")
@@ -206,7 +206,8 @@ pred = model.predict_instances(img, n_tiles=model._guess_n_tiles(img), show_tile
 plot_img_label(img, lbl, img_title="Training image", lbl_title="Annotations")
 plot_img_label(img, pred, img_title="Training image", lbl_title="Predicted segmentation")
 
-# %%
+# %% tags=[]
+# %%capture
 Y_val_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_val)]
 
@@ -270,13 +271,13 @@ model_aug = StarDist2D(conf, name='single_image_augmented', basedir='models')
 log_aug = model_aug.train(
     [img],
     [lbl],
-    validation_data=(X_val, Y_val),
+    validation_data=([X_val[22]], [Y_val[22]]),
     augmenter=augmenter_fun,
-    epochs=50,
+    epochs=100,
     steps_per_epoch=10,
     seed=42
 )
-model_aug.optimize_thresholds([img], [lbl])
+model_aug.optimize_thresholds([X_val[22]], [Y_val[22]])
 
 # %%
 plt.plot(log_aug.history["loss"], label="Train")
@@ -293,6 +294,7 @@ plot_img_label(img, lbl, img_title="Training image", lbl_title="Annotations")
 plot_img_label(img, pred_aug, img_title="Training image", lbl_title="Predicted segmentation")
 
 # %% tags=[]
+# %%capture
 Y_val_pred_aug = [model_aug.predict_instances(x, n_tiles=model_aug._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_val)]
 
@@ -336,7 +338,6 @@ Y_val_pred = [model_full.predict_instances(x, n_tiles=model_full._guess_n_tiles(
               for x in tqdm(X_val)]
 
 # %%
-plot_img_label(X_val[0],Y_val[0], lbl_title="label GT")
-plot_img_label(X_val[0],Y_val_pred[0], lbl_title="label Pred")
-
-# %%
+idx = 22
+plot_img_label(X_val[idx],Y_val[idx], lbl_title="label GT")
+plot_img_label(X_val[idx],Y_val_pred[idx], lbl_title="label Pred")
