@@ -8,9 +8,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: tf
 #     language: python
-#     name: python3
+#     name: tf
 # ---
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
@@ -44,6 +44,7 @@ from stardist import fill_label_holes, random_label_cmap, calculate_extents, gpu
 from stardist.matching import matching, matching_dataset
 from stardist.models import Config2D, StarDist2D, StarDistData2D
 
+from skimage.transform import resize
 np.random.seed(42)
 lbl_cmap = random_label_cmap()
 
@@ -141,8 +142,11 @@ X_trn, Y_trn = preprocess(X_trn, Y_trn)
 X_val, Y_val = preprocess(X_val, Y_val)
 X_test, Y_test = preprocess(X_test, Y_test)
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # # 4. Training with one annotated image
+
+# %% [markdown]
+# We're going to annotate two images: one will be used to train the model, while the other will be used for validation purposes.
 
 # %% [markdown] tags=[]
 # ## Training setup
@@ -154,7 +158,7 @@ n_rays = 32
 use_gpu = True and gputools_available()
 
 # Predict on subsampled grid for increased efficiency and larger field of view
-grid = (2,2)
+grid = (4,4)
 
 conf = Config2D (
     n_rays = n_rays,
@@ -189,8 +193,9 @@ if any(median_size > fov):
 
 # %% tags=[]
 # # %%capture
-log = model.train([img], [lbl], validation_data=([X_val[22]], [Y_val[22]]), epochs=100, steps_per_epoch=10, seed=42)
-model.optimize_thresholds([X_val[22]], [Y_val[22]])
+X_val_single, Y_val_single = [X_val[22]], [Y_val[22]]
+log = model.train([img], [lbl], validation_data=(X_val_single, Y_val_single), epochs=100, steps_per_epoch=10, seed=42)
+model.optimize_thresholds(X_val_single, Y_val_single)
 
 # %%
 plt.plot(log.history["loss"], label="Train")
@@ -208,14 +213,14 @@ plot_img_label(img, pred, img_title="Training image", lbl_title="Predicted segme
 
 # %% tags=[]
 # %%capture
-Y_val_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm(X_val)]
+Y_val_single_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
+              for x in tqdm(X_val_single)]
 
 # %%
 idx = 22
-plot_img_label(X_val[idx], Y_val_pred[idx], img_title=f"Validation image (ID {idx})", lbl_title="Predicted segmentation")
+plot_img_label(X_val_single[0], Y_val_single_pred[0], img_title=f"Validation image (ID {idx})", lbl_title="Predicted segmentation")
 
-# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true
+# %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # # 5. More training data, part 1: Augmentations
 
 # %% [markdown]
@@ -233,27 +238,29 @@ plot_img_label(img, lbl, img_title="Original", lbl_title="Original annotation")
 transform = Augmend()
 transform.add([IntensityScaleShift(scale=(0.75, 1.33), shift=(-0.33, 0.33)), Identity()])
 # transform.add([AdditiveNoise(), Identity()])
-# transform.add([Elastic(amount=32, grid=5, order=3), Elastic(amount=32, grid=5, order=0)])
+# transform.add([Elastic(amount=3, grid=5, order=1, use_gpu=False), Elastic(amount=3, grid=5, order=0, use_gpu=False)])
 # transform.add([Rotate(order=1, mode="constant"), Rotate(order=0, mode="constant")])
 # transform.add([Elastic(amount=32, order=1), Elastic(amount=32, order=0)])
 # transform.add([Scale(order=1), Scale(order=0)])
 
 
-img_aug, lbl_aug = transform([img, lbl])
+img_aug, lbl_aug = transform([X_trn[0], Y_trn[0]])
 plot_img_label(img_aug, lbl_aug, img_title="Transformed image", lbl_title="Transformed label")
 
 
 # %%
 def build_augmenter(use_gpu):
+    axis= (0, 1)
     aug = Augmend()
-    aug.add([Elastic(amount=5, grid=11, use_gpu=use_gpu, order=1), Elastic(amount=5, grid=11, use_gpu=use_gpu, order=0)])
-    aug.add([Rotate(order=1), Rotate(order=0)])
+    aug.add([Elastic(amount=5, grid=11, use_gpu=use_gpu, order=1, axis=axis), Elastic(amount=5, grid=11, use_gpu=use_gpu, order=0, axis=axis)])
+    aug.add([Rotate(order=1, mode="constant"), Rotate(order=0, mode="constant")])
     aug.add([IntensityScaleShift(), Identity()])
+    aug.add([Scale(order=1, amount=(.8,1.25), mode="constant"), Scale(order=0, amount=(.8,1.25), mode="constant")])
     aug.add([AdditiveNoise(sigma=0.1), Identity()])
 
     return aug
 
-augmenter = build_augmenter(use_gpu=use_gpu)
+augmenter = build_augmenter(use_gpu=False)
 augmenter_fun = lambda x, y: augmenter((x, y))
 
 # %%
@@ -264,20 +271,20 @@ for _ in range(3):
     plot_img_label(img_aug, lbl_aug, img_title="Image augmented", lbl_title="Label augmented")
 
 # %%
-model_aug = StarDist2D(conf, name='single_image_augmented', basedir='models')
+model_aug = StarDist2D(conf, name='single_image_augmented_test', basedir='models')
 
 # %% tags=[]
 # # %%capture
 log_aug = model_aug.train(
     [img],
     [lbl],
-    validation_data=([X_val[22]], [Y_val[22]]),
+    validation_data=(X_val_single, Y_val_single),
     augmenter=augmenter_fun,
-    epochs=100,
+    epochs=1,
     steps_per_epoch=10,
     seed=42
 )
-model_aug.optimize_thresholds([X_val[22]], [Y_val[22]])
+model_aug.optimize_thresholds(X_val_single, Y_val_single)
 
 # %%
 plt.plot(log_aug.history["loss"], label="Train")
