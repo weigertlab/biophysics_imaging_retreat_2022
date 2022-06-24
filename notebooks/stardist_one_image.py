@@ -8,16 +8,30 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: tf
+#     display_name: Python [conda env:py39] *
 #     language: python
-#     name: tf
+#     name: conda-env-py39-py
 # ---
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
-# # 0. Install StarDist as described [here]( https://github.com/stardist/stardist#installation)
+# # 0. Install StarDist as described [here]( https://github.com/stardist/stardist#installation) (and some dependencies)
 
 # %%
 import stardist
+# !pip install jupytext
+# !pip install git+https://github.com/stardist/augmend.git
+import augmend
+from augmend import (
+    Augmend,
+    FlipRot90,
+    AdditiveNoise,
+    Elastic,
+    Rotate,
+    IntensityScaleShift,
+    Scale,
+    Identity,
+)
+# !pip install gputools pandas seaborn
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[]
 # # 1. Load packages
@@ -34,43 +48,37 @@ import matplotlib.pyplot as plt
 # %matplotlib inline
 # %config InlineBackend.figure_format = 'retina'
 matplotlib.rcParams['figure.figsize'] = (12, 5)
-
+import pandas as pd
+import tensorflow as tf
 from glob import glob
+import seaborn as sns 
 from tqdm.notebook import tqdm
 from tifffile import imread
 from csbdeep.utils import normalize
+from csbdeep.utils import Path
 
 from stardist import fill_label_holes, random_label_cmap, calculate_extents, gputools_available
 from stardist.matching import matching, matching_dataset
 from stardist.models import Config2D, StarDist2D, StarDistData2D
+from stardist.plot import render_label
 
 from skimage.transform import resize
 np.random.seed(42)
 lbl_cmap = random_label_cmap()
 
+# %% [markdown]
+# ### Download data (images and masks, uncomment and only do this once!)
+
 # %%
-# %%capture
-# !pip install jupytext
-# !pip install git+https://github.com/stardist/augmend.git
-import augmend
-from augmend import (
-    Augmend,
-    FlipRot90,
-    AdditiveNoise,
-    Elastic,
-    Rotate,
-    IntensityScaleShift,
-    Scale,
-    Identity,
-)
-# !pip install gputools
+# # !wget https://drive.switch.ch/index.php/s/F8wpskqkkyVfnm0/download -O data.zip 
+# # !unzip data.zip
 
 # %% [markdown] jp-MarkdownHeadingCollapsed=true tags=[] jp-MarkdownHeadingCollapsed=true
 # # 2. Load and prepare annotated image
 
 # %%
-base_path = Path("~/EPFL/data/yeast/split").expanduser()
-# base_path = Path("/data/datasets/yeast/yeast_masks/splits").expanduser()
+base_path = Path("yeastnet")
+
 
 # %% [markdown]
 # Utility functions
@@ -80,7 +88,7 @@ def plot_img_label(img, lbl, img_title="image", lbl_title="label", **kwargs):
     fig, (ai,al) = plt.subplots(1,2, figsize=(12,5), gridspec_kw=dict(width_ratios=(1,1)))
     im = ai.imshow(img, cmap='gray', clim=(0,1))
     ai.set_title(img_title)    
-    al.imshow(lbl, cmap=lbl_cmap)
+    al.imshow(render_label(lbl, img=.3*img, normalize_img=False, cmap=lbl_cmap))
     al.set_title(lbl_title)
     plt.tight_layout()
     
@@ -96,8 +104,8 @@ def preprocess(X, Y, axis_norm=(0,1)):
 
 
 # %%
-img = imread(base_path / "train/images/ddF8BF_crop_1_10.tif")
-lbl = imread(base_path / "train/masks/ddF8BF_crop_1_10.tif")
+img = imread(base_path / 'train/images/yeastnet_img_010.tif')
+lbl = imread(base_path / 'train/masks/yeastnet_010_mask.tif')
 n_channel = 1
 
 # %% [markdown]
@@ -143,7 +151,7 @@ X_val, Y_val = preprocess(X_val, Y_val)
 X_test, Y_test = preprocess(X_test, Y_test)
 
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
-# # 4. Training with one annotated image
+# # 4. Training with a single annotated image
 
 # %% [markdown]
 # We're going to annotate two images: one will be used to train the model, while the other will be used for validation purposes.
@@ -158,7 +166,7 @@ n_rays = 32
 use_gpu = True and gputools_available()
 
 # Predict on subsampled grid for increased efficiency and larger field of view
-grid = (4,4)
+grid = (2,2)
 
 conf = Config2D (
     n_rays = n_rays,
@@ -166,10 +174,12 @@ conf = Config2D (
     use_gpu = use_gpu,
     n_channel_in = n_channel,
     train_learning_rate = 0.0005,
+    train_patch_size = (384,384),
+    train_epochs=30, 
 )
 
 # Print config to see default values
-# vars(conf)
+vars(conf)
 
 # %%
 if use_gpu:
@@ -191,34 +201,49 @@ print(f"network field of view :  {fov}")
 if any(median_size > fov):
     print("WARNING: median object size larger than field of view of the neural network.")
 
+# %%
+df = pd.DataFrame()
+def add_history(df0, hist, name):
+    #convert history dict to dataframe and add/concatenate it to an existing dataframe 
+    keys = tuple(c.split('val_')[1] for c in hist.keys() if c.startswith('val_'))
+    res_train = dict(tuple((k,hist[k]) for k in keys) + (('phase', 'train'),))
+    res_val = dict(tuple((k,hist[f'val_{k}']) for k in keys) + (('phase', 'val'),))
+    for res in (res_train, res_val):
+        res['name'] = name
+        res['step'] = np.arange(len(hist['loss']))
+    df = pd.concat((pd.DataFrame(res_train), pd.DataFrame(res_val)))
+    df = pd.concat((df0, df)).reset_index(drop=True)
+    return df    
+
+
 # %% tags=[]
 # # %%capture
-X_val_single, Y_val_single = [X_val[22]], [Y_val[22]]
-log = model.train([img], [lbl], validation_data=(X_val_single, Y_val_single), epochs=100, steps_per_epoch=10, seed=42)
+X_val_single, Y_val_single = [X_val[5]], [Y_val[5]]
+log = model.train([img], [lbl], 
+                  validation_data=(X_val_single, Y_val_single), 
+                  steps_per_epoch=20, 
+                  seed=42)
+df = add_history(df, log.history, 'single image')
 model.optimize_thresholds(X_val_single, Y_val_single)
 
 # %%
-plt.plot(log.history["loss"], label="Train")
-plt.plot(log.history["val_loss"], label="Validation")
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Training with one annotated image")
-plt.legend()
-plt.show();
+sns.lineplot(data=df, x='step', y='loss', hue = 'name', style='phase')
 
 # %%
 pred = model.predict_instances(img, n_tiles=model._guess_n_tiles(img), show_tile_progress=False)[0]
 plot_img_label(img, lbl, img_title="Training image", lbl_title="Annotations")
 plot_img_label(img, pred, img_title="Training image", lbl_title="Predicted segmentation")
 
-# %% tags=[]
-# %%capture
-Y_val_single_pred = [model.predict_instances(x, n_tiles=model._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm(X_val_single)]
+# %% [markdown]
+# ### Prediction on unseen test image (single image model)
 
 # %%
-idx = 22
-plot_img_label(X_val_single[0], Y_val_single_pred[0], img_title=f"Validation image (ID {idx})", lbl_title="Predicted segmentation")
+idx_test = 3
+Y_pred_single, _  = model.predict_instances(X_test[idx_test])
+
+# %%
+plot_img_label(X_test[idx_test],Y_test[idx_test], lbl_title="GT")
+plot_img_label(X_test[idx_test], Y_pred_single, img_title=f"Test image", lbl_title="Predicted segmentation")
 
 # %% [markdown] tags=[] jp-MarkdownHeadingCollapsed=true tags=[]
 # # 5. More training data, part 1: Augmentations
@@ -237,14 +262,14 @@ plot_img_label(img, lbl, img_title="Original", lbl_title="Original annotation")
 # %%
 transform = Augmend()
 transform.add([IntensityScaleShift(scale=(0.75, 1.33), shift=(-0.33, 0.33)), Identity()])
-# transform.add([AdditiveNoise(), Identity()])
-# transform.add([Elastic(amount=3, grid=5, order=1, use_gpu=False), Elastic(amount=3, grid=5, order=0, use_gpu=False)])
+transform.add([AdditiveNoise(), Identity()])
+transform.add([Elastic(amount=3, grid=5, order=1, use_gpu=False), Elastic(amount=3, grid=5, order=0, use_gpu=False)])
 # transform.add([Rotate(order=1, mode="constant"), Rotate(order=0, mode="constant")])
 # transform.add([Elastic(amount=32, order=1), Elastic(amount=32, order=0)])
 # transform.add([Scale(order=1), Scale(order=0)])
 
 
-img_aug, lbl_aug = transform([X_trn[0], Y_trn[0]])
+img_aug, lbl_aug = transform([X_trn[15], Y_trn[15]])
 plot_img_label(img_aug, lbl_aug, img_title="Transformed image", lbl_title="Transformed label")
 
 
@@ -252,9 +277,9 @@ plot_img_label(img_aug, lbl_aug, img_title="Transformed image", lbl_title="Trans
 def build_augmenter(use_gpu):
     axis= (0, 1)
     aug = Augmend()
-    aug.add([Elastic(amount=5, grid=11, use_gpu=use_gpu, order=1, axis=axis), Elastic(amount=5, grid=11, use_gpu=use_gpu, order=0, axis=axis)])
+    aug.add([Elastic(amount=5, grid=11, use_gpu=False, order=1, axis=axis), Elastic(amount=5, grid=11, use_gpu=False, order=0, axis=axis)])
     aug.add([Rotate(order=1, mode="constant"), Rotate(order=0, mode="constant")])
-    aug.add([IntensityScaleShift(), Identity()])
+    aug.add([IntensityScaleShift(scale=(0.75, 1.33), shift=(-0.1, 0.1)), Identity()])
     aug.add([Scale(order=1, amount=(.8,1.25), mode="constant"), Scale(order=0, amount=(.8,1.25), mode="constant")])
     aug.add([AdditiveNoise(sigma=0.1), Identity()])
 
@@ -280,55 +305,44 @@ log_aug = model_aug.train(
     [lbl],
     validation_data=(X_val_single, Y_val_single),
     augmenter=augmenter_fun,
-    epochs=1,
-    steps_per_epoch=10,
+    steps_per_epoch=20,
     seed=42
 )
+df = add_history(df, log_aug.history, 'single image w augmentation')
 model_aug.optimize_thresholds(X_val_single, Y_val_single)
 
 # %%
-plt.plot(log_aug.history["loss"], label="Train")
-plt.plot(log_aug.history["val_loss"], label="Validation")
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Training with one image + data augmentations")
-plt.legend()
-plt.show();
+sns.lineplot(data=df, x='step', y='loss', hue = 'name', style='phase')
 
 # %%
 pred_aug = model_aug.predict_instances(img, n_tiles=model_aug._guess_n_tiles(img), show_tile_progress=False)[0]
 plot_img_label(img, lbl, img_title="Training image", lbl_title="Annotations")
 plot_img_label(img, pred_aug, img_title="Training image", lbl_title="Predicted segmentation")
 
-# %% tags=[]
-# %%capture
-Y_val_pred_aug = [model_aug.predict_instances(x, n_tiles=model_aug._guess_n_tiles(x), show_tile_progress=False)[0]
-              for x in tqdm(X_val)]
+# %% [markdown]
+# ### Prediction on unseen test image (single image model with augmentation)
 
 # %%
-idx = 22
-plot_img_label(X_val[idx], Y_val_pred_aug[idx], img_title=f"Validation image (ID {idx})", lbl_title="Predicted segmentation")
+Y_pred_aug, _  = model_aug.predict_instances(X_test[idx_test])
+
+plot_img_label(X_test[idx_test],Y_test[idx_test], lbl_title="GT")
+plot_img_label(X_test[idx_test], Y_pred_aug, img_title=f"Test image", lbl_title="Predicted segmentation")
 
 # %% [markdown] tags=[]
 # # 6. More training data, part 2: Annotate more by hand!
 
 # %% tags=[]
 model_full = StarDist2D(conf, name='full_dataset', basedir='models')
-history_regular = model_full.train(X_trn, Y_trn, validation_data=(X_val,Y_val), augmenter=augmenter_fun, epochs=100, steps_per_epoch=np.ceil(len(X_trn)/conf.train_batch_size))
+history_regular = model_full.train(X_trn, Y_trn, 
+                                   validation_data=(X_val,Y_val), 
+                                   augmenter=augmenter_fun, 
+                                   steps_per_epoch=50)
 
-# %%
-plt.figure(figsize=(12,6))
-plt.plot(range(100), history_regular.history["loss"], label="Train")
-plt.plot(range(100), history_regular.history["val_loss"], label="Validation")
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Regular training pipeline")
-plt.legend()
-plt.show();
-
-# %%
-# %%capture
+df = add_history(df, history_regular.history, 'full')
 model_full.optimize_thresholds(X_val, Y_val)
+
+# %%
+sns.lineplot(data=df, x='step', y='loss', hue = 'name', style='phase')
 
 # %%
 # %%capture
@@ -344,7 +358,16 @@ plot_img_label(img,Y_trn_pred[0], lbl_title="label Pred")
 Y_val_pred = [model_full.predict_instances(x, n_tiles=model_full._guess_n_tiles(x), show_tile_progress=False)[0]
               for x in tqdm(X_val)]
 
+# %% [markdown]
+# ### Prediction on unseen test image (Full model)
+
 # %%
-idx = 22
+Y_pred_full, _  = model_full.predict_instances(X_test[idx_test])
+
+plot_img_label(X_test[idx_test],Y_test[idx_test], lbl_title="GT")
+plot_img_label(X_test[idx_test], Y_pred_full, img_title=f"Test image", lbl_title="Predicted segmentation")
+
+# %%
+idx = 3
 plot_img_label(X_val[idx],Y_val[idx], lbl_title="label GT")
 plot_img_label(X_val[idx],Y_val_pred[idx], lbl_title="label Pred")
