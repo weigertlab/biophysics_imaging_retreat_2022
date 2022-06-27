@@ -3,10 +3,9 @@
 ## Agenda:
 1. Image Analysis clinic (45 mins)
 1. Deep-Learning-based image analysis from scratch in 45 mins
-1. (TODO Outcome of time arrow predictions on participant's datasets)
 
 ## Resources
-- Dataset: Phase contrast microscopy of YEAST cells (TODO download link)
+- Dataset: Phase contrast microscopy of YEAST cells: https://drive.switch.ch/index.php/s/F8wpskqkkyVfnm0/download  
 - Napari (python-based image viewer): https://napari.org/tutorials/fundamentals/installation.html
 - StarDist https://github.com/stardist/stardist#installation
 - StarDist napari plugin https://github.com/stardist/stardist-napari
